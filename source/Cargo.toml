@@ -1,0 +1,34 @@
+[package]
+name = "comet_madness"
+version = "1.0.0"
+edition = "2021"
+description = "COMET CRAZE — a modern neon reboot of the 1985 Commodore 64 shooter Crazy Comets"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "cometmadness"
+path = "src/main.rs"
+
+[dependencies]
+lewton = "0.9"
+macroquad = { version = "0.4", default-features = true, features = ["audio"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(debug_console)'] }
+
+[build-dependencies]
+embed-resource = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[workspace]
+members = ["."]
+exclude = ["tools/soundforge"]
