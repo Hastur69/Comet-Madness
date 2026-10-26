@@ -18,6 +18,100 @@ use macroquad::prelude::*;
 use std::cell::RefCell;
 
 const DEADZONE: f32 = 0.35;
+// Direct Windows joystick readings for USB pads whose layout gilrs cannot identify.
+// No extra crate/dependency: this uses the same winmm API as joy.cpl.
+#[cfg(windows)]
+mod winjoy {
+    use super::Raw;
+    #[repr(C)]
+    #[derive(Default)]
+    struct JoyInfoEx {
+        size: u32, flags: u32, x: u32, y: u32, z: u32, r: u32,
+        u: u32, v: u32, buttons: u32, button_number: u32,
+        pov: u32, reserved1: u32, reserved2: u32,
+    }
+    #[repr(C)]
+    #[derive(Clone)]
+    struct JoyCapsW {
+        mid: u16, pid: u16, name: [u16; 32],
+        xmin: u32, xmax: u32, ymin: u32, ymax: u32,
+        zmin: u32, zmax: u32, num_buttons: u32, period_min: u32,
+        period_max: u32, rmin: u32, rmax: u32,
+        umin: u32, umax: u32, vmin: u32, vmax: u32,
+        caps: u32, max_axes: u32, num_axes: u32, max_buttons: u32,
+        reg_key: [u16; 32], oem_vxd: [u16; 260],
+    }
+    impl Default for JoyCapsW {
+        fn default() -> Self { unsafe { std::mem::zeroed() } }
+    }
+    #[link(name = "winmm")]
+    extern "system" {
+        fn joyGetNumDevs() -> u32;
+        fn joyGetDevCapsW(id: usize, caps: *mut JoyCapsW, size: u32) -> u32;
+        fn joyGetPosEx(id: u32, info: *mut JoyInfoEx) -> u32;
+    }
+    pub struct Device {
+        pub uuid: String,
+        pub name: String,
+        pub raw: Vec<Raw>,
+    }
+    fn normalized(v: u32, min: u32, max: u32) -> f32 {
+        if max <= min { return 0.0; }
+        ((v.saturating_sub(min) as f32 / (max - min) as f32) * 2.0 - 1.0).clamp(-1.0, 1.0)
+    }
+    pub fn devices() -> Vec<Device> {
+        let mut out = Vec::new();
+        let count = unsafe { joyGetNumDevs() }.min(32);
+        for id in 0..count {
+            let mut caps = JoyCapsW::default();
+            if unsafe { joyGetDevCapsW(id as usize, &mut caps, std::mem::size_of::<JoyCapsW>() as u32) } != 0 {
+                continue;
+            }
+            let mut info = JoyInfoEx { size: std::mem::size_of::<JoyInfoEx>() as u32, flags: 0xff, ..Default::default() };
+            if unsafe { joyGetPosEx(id, &mut info) } != 0 { continue; }
+            let len = caps.name.iter().position(|&x| x == 0).unwrap_or(caps.name.len());
+            let name = String::from_utf16_lossy(&caps.name[..len]);
+            // Model-specific key (rather than a transient joystick slot).
+            let uuid = format!("winmm-{:04x}{:04x}-{}", caps.mid, caps.pid,
+                name.as_bytes().iter().map(|b| format!("{:02x}", b)).collect::<String>());
+            let mut raw = Vec::new();
+            for b in 0..caps.num_buttons.min(32) {
+                raw.push(Raw { code: 20_000 + b, is_axis: false, value: if info.buttons & (1 << b) != 0 { 1.0 } else { 0.0 } });
+            }
+            raw.push(Raw { code: 10_000, is_axis: true,
+                value: normalized(info.x, caps.xmin, caps.xmax) });
+            raw.push(Raw { code: 10_001, is_axis: true,
+                value: normalized(info.y, caps.ymin, caps.ymax) });
+            // POV in hundredths of a degree, 0=north, 9000=east.
+            // Represent the hat as two signed axes so calibration works unmodified.
+            let pov = if caps.caps & 0x10 == 0 || info.pov > 35999 {
+                None
+            } else { Some(info.pov as f32 / 100.0 * std::f32::consts::PI / 180.0) };
+            raw.push(Raw { code: 10_006, is_axis: true, value: pov.map_or(0.0, |a| a.sin()) });
+            raw.push(Raw { code: 10_007, is_axis: true, value: pov.map_or(0.0, |a| -a.cos()) });
+            out.push(Device { uuid, name, raw });
+        }
+        out
+    }
+}
+#[cfg(windows)]
+fn raw_active(raw: &[Raw], src: Src) -> bool {
+    match src {
+        Src::Btn(code) => raw.iter().any(|r| !r.is_axis && r.code == code && r.value > 0.5),
+        Src::Axis(code, sign, threshold) =>
+            raw.iter().any(|r| r.is_axis && r.code == code && sign * (r.value - threshold) > 0.0),
+    }
+}
+#[cfg(windows)]
+fn known_gilrs(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    ["xbox", "xinput", "microsoft", "playstation", "dualshock",
+     "dualsense", "sony", "nintendo", "switch", "8bitdo"]
+        .iter().any(|s| n.contains(s))
+}
+
+
+
 
 /// The calibration steps, in order.
 pub const STEPS: [&str; 6] = ["UP", "DOWN", "LEFT", "RIGHT", "FIRE", "PAUSE  (START)"];
@@ -81,6 +175,10 @@ struct Pad {
     stick: Vec2,
     fire: bool,
     connected: Option<String>,
+    #[cfg(windows)]
+    win_prev: Vec<Raw>,
+    #[cfg(windows)]
+    win_name: Option<String>,
 }
 
 fn load_calibs() -> Vec<Calib> {
@@ -130,6 +228,10 @@ thread_local! {
         stick: Vec2::ZERO,
         fire: false,
         connected: None,
+        #[cfg(windows)]
+        win_prev: Vec::new(),
+        #[cfg(windows)]
+        win_name: None,
     });
 }
 
@@ -160,11 +262,30 @@ pub fn update() {
         let mut stick = Vec2::ZERO;
         let mut fire = false;
         let mut start_axis = false;
+        #[cfg(windows)]
+        let win = winjoy::devices().into_iter().next();
+        #[cfg(windows)]
+        let win_prev = p.win_prev.clone();
+        #[cfg(windows)]
+        let mut win_current = Vec::new();
+        #[cfg(windows)]
+        if let Some(ref device) = win {
+            if p.win_name.as_deref() != Some(device.uuid.as_str()) {
+                p.connected = Some(format!("{}  -  CALIBRATE IN OPTIONS IF NEEDED", device.name.to_uppercase()));
+                p.win_name = Some(device.uuid.clone());
+                p.win_prev.clear();
+            }
+            win_current = device.raw.clone();
+        } else {
+            p.win_name = None;
+        }
         let calibs = &p.calibs;
         if let Some(g) = p.gilrs.as_mut() {
             // ---- events: menu presses
             while let Some(ev) = g.next_event() {
                 let id: GamepadId = ev.id;
+                #[cfg(windows)]
+                if win.is_some() { continue; } // winmm exclusively owns the generic USB pad
                 let cal = calibs.iter().find(|c| c.uuid == uuid_hex(g.gamepad(id).uuid()));
                 match ev.event {
                     EventType::ButtonPressed(b, code) => {
@@ -195,6 +316,8 @@ pub fn update() {
             }
             // ---- held state: movement / fire
             for (_, gp) in g.gamepads() {
+                #[cfg(windows)]
+                if win.is_some() { continue; }
                 let uuid = uuid_hex(gp.uuid());
                 if let Some(c) = calibs.iter().find(|c| c.uuid == uuid) {
                     let on = |i: usize| c.binds[i].map_or(false, |s| src_active(&gp, s));
@@ -261,6 +384,32 @@ pub fn update() {
                     }
                 }
             }
+        }
+        #[cfg(windows)]
+        if let Some(device) = win {
+            let raw = &win_current;
+            // Exactly as in Pumpkin King: -X left, +X right, -Y up, +Y down;
+            // hat in hundredths of a degree, centred = no direction.
+            let axis = |code| raw.iter().find(|r| r.is_axis && r.code == code).map_or(0.0, |r| r.value);
+            let x = if axis(10_006).abs() > 0.5 { axis(10_006) } else { axis(10_000) };
+            let y = if axis(10_007).abs() > 0.5 { axis(10_007) } else { axis(10_001) };
+            stick += vec2(if x.abs() > DEADZONE { x } else { 0.0 },
+                          if y.abs() > DEADZONE { y } else { 0.0 });
+            if let Some(c) = calibs.iter().find(|c| c.uuid == device.uuid) {
+                // Use calibrated action buttons; ignore historical direction bindings.
+                let on = |i: usize| c.binds[i].map_or(false, |s| raw_active(raw, s));
+                let was = |i: usize| c.binds[i].map_or(false, |s| raw_active(&win_prev, s));
+                fire |= on(4);
+                if on(4) && !was(4) { action = true; }
+                if on(5) && !was(5) { start = true; }
+            } else {
+                // Calibrate buttons to avoid guessing the pad's Start/fire numbering.
+                // Directions work immediately through winmm without calibration.
+                // Do not infer action from arbitrary buttons (would misread directions).
+            }
+            p.win_prev = win_current;
+        } else {
+            p.win_prev.clear();
         }
         if start_axis && !p.prev_start_axis {
             start = true;
@@ -341,6 +490,11 @@ pub fn menu_right() -> bool {
 pub fn first_pad() -> Option<(String, String, bool)> {
     PAD.with(|p| {
         let p = p.borrow();
+        #[cfg(windows)]
+        if let Some(d) = winjoy::devices().into_iter().next() {
+            let cal = p.calibs.iter().any(|c| c.uuid == d.uuid);
+            return Some((d.uuid, d.name.to_uppercase(), cal));
+        }
         let g = p.gilrs.as_ref()?;
         let (_, gp) = g.gamepads().next()?;
         let uuid = uuid_hex(gp.uuid());
@@ -354,6 +508,10 @@ pub fn raw_snapshot(uuid: &str) -> Vec<Raw> {
     PAD.with(|p| {
         let p = p.borrow();
         let mut v = vec![];
+        #[cfg(windows)]
+        if let Some(d) = winjoy::devices().into_iter().find(|d| d.uuid == uuid) {
+            return d.raw;
+        }
         if let Some(g) = p.gilrs.as_ref() {
             for (_, gp) in g.gamepads() {
                 if uuid_hex(gp.uuid()) != uuid {
