@@ -21,16 +21,49 @@ High scores and settings are saved to `%APPDATA%\\CometMadness\\`.
 
 ## Controls
 
-|Action|Keys|
-|-|-|
-|Move (8 directions)|**Arrow keys** or **W A S D**|
-|Fire (hold for auto-fire)|**Space**, **Ctrl**, **Z** or **left mouse**|
-|Pause|**Esc** / **P**|
+|Action|Keys|Controller|
+|-|-|-|
+|Move (8 directions)|**Arrow keys** or **W A S D**|**D-pad** or **left stick**|
+|Fire (hold for auto-fire)|**Space**, **Ctrl**, **Z** or **left mouse**|**any face button** (A/B/C/X/Y/Z, shoulders, triggers)|
+|Menu OK / back|**Enter** / **Esc**|**any face button** or **Start** / **Select** (Mode)|
+|Pause|**Esc** / **P**|**Start**|
 |Fullscreen|**F11** or **Alt+Enter**|
 |CRT effect on/off|**F2**|
 |Music on/off|**M**|
 
-Like the C64 game, the ship never rotates — it always fires straight up, into the screen.
+Like the C64 game, the ship never rotates — it always fires straight up, into the screen. Steer left or
+right and the starfield rolls the other way, easing in and out like the original.
+
+Controllers: Xbox-style pads work straight away. For other USB pads (Sega Genesis / Mega Drive / Saturn
+USB controllers and the like), go to **OPTIONS → CALIBRATE CONTROLLER** (the row appears while a controller
+is plugged in) and press up, down, left, right, fire and pause when asked. The calibration is saved per
+controller; Backspace on that row returns it to automatic.
+
+## Game modes
+
+Choose the mode in **OPTIONS → GAME MODE**, then pick **PLAY** on the title screen.
+
+**CLASSIC** plays like the 1985 original. Rounds cycle through three stage types, getting harder every lap:
+
+|Stage|Rounds|What happens|
+|-|-|-|
+|**Standard**|1, 4, 7, 10…|Planets only — no comets, no capsules|
+|**Bonus Round**|2, 5, 8, 11…|Planets and a few comets, plus one capsule at a time that drops in and bounces around until you catch it (200 each). Any left when the round ends fades away.|
+|**Extermination**|3, 6, 9, 12…|Hunting comets that keep coming, plus a few mad (mostly Nova) planets. No capsules.|
+
+Comets count toward the round's targets and are paced like Crazy mode's — well spaced early, tightening every round. Lose a life and the screen is cleared while your ship returns —
+nothing you hadn't destroyed is credited, so the round's remaining count stays the same.
+
+Classic's galaxy runs on a 9-round loop: rounds 1–3 *Comet Rush* with full nebula → **warp** →
+4–6 *Supernova Cascade* as the nebula fades away → **fire warp** → 7–9 *Crazy Comets* in a starless
+sector (faint fiery nebula, then faint blue, then the void) → **reverse warp** back to the start, with
+difficulty still climbing. Standard and Bonus rounds pulse the tunnel rings to the beat; Extermination
+rounds turn them into a bass visualizer.
+
+**CRAZY** is the remixed version: endless rounds with comets and rockets throughout, music changing
+every 4 rounds, warps after every 4th round and a void every 10th.
+
+Each mode keeps its own high-score table (switch tables with left/right on the HALL OF FAME screen).
 
 ## How to play
 
@@ -73,6 +106,7 @@ CometMadness/
 │  ├─ gfx.rs             shaders (planet, bloom, composite/CRT), procedural textures, text
 │  ├─ fx.rs              particles, shockwaves, starfield, screen shake, banners
 │  ├─ audio.rs           music crossfades, beat clock, SFX
+│  ├─ pad.rs             game controller input (gilrs)
 │  ├─ bot.rs             attract-mode autopilot
 │  ├─ persist.rs         high scores \& settings
 │  └─ util.rs            math / colour helpers

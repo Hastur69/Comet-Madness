@@ -17,11 +17,13 @@ pub struct Settings {
     pub crt: bool,
     pub fullscreen: bool,
     pub screen_shake: bool,
+    /// game mode chosen in Options: CLASSIC (true) or CRAZY (false)
+    pub classic: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { music_volume: 0.7, sfx_volume: 0.8, crt: true, fullscreen: false, screen_shake: true }
+        Settings { music_volume: 0.7, sfx_volume: 0.8, crt: true, fullscreen: false, screen_shake: true, classic: true }
     }
 }
 
@@ -61,8 +63,17 @@ pub fn default_scores() -> Vec<Entry> {
     seed.iter().map(|&(n, s, l)| Entry { name: n.to_string(), score: s, level: l }).collect()
 }
 
-pub fn load_scores() -> Vec<Entry> {
-    let path = data_dir().join("scores.txt");
+/// Each game mode keeps its own table. CRAZY keeps the original scores.txt.
+fn scores_file(classic: bool) -> &'static str {
+    if classic {
+        "scores_classic.txt"
+    } else {
+        "scores.txt"
+    }
+}
+
+pub fn load_scores(classic: bool) -> Vec<Entry> {
+    let path = data_dir().join(scores_file(classic));
     let mut v: Vec<Entry> = match std::fs::read_to_string(&path) {
         Ok(txt) => txt
             .lines()
@@ -84,8 +95,8 @@ pub fn load_scores() -> Vec<Entry> {
     v
 }
 
-pub fn save_scores(v: &[Entry]) {
-    let path = data_dir().join("scores.txt");
+pub fn save_scores(v: &[Entry], classic: bool) {
+    let path = data_dir().join(scores_file(classic));
     let txt: String = v.iter().map(|e| format!("{}\t{}\t{}\n", e.name, e.score, e.level)).collect();
     let _ = std::fs::write(path, txt);
 }
@@ -114,6 +125,7 @@ pub fn load_settings() -> Settings {
                 "crt" => s.crt = v == "true",
                 "fullscreen" => s.fullscreen = v == "true",
                 "screen_shake" => s.screen_shake = v == "true",
+                "classic" => s.classic = v == "true",
                 _ => {}
             }
         }
@@ -126,8 +138,8 @@ pub fn load_settings() -> Settings {
 pub fn save_settings(s: &Settings) {
     let path = data_dir().join("settings.txt");
     let txt = format!(
-        "music_volume={}\nsfx_volume={}\ncrt={}\nfullscreen={}\nscreen_shake={}\n",
-        s.music_volume, s.sfx_volume, s.crt, s.fullscreen, s.screen_shake
+        "music_volume={}\nsfx_volume={}\ncrt={}\nfullscreen={}\nscreen_shake={}\nclassic={}\n",
+        s.music_volume, s.sfx_volume, s.crt, s.fullscreen, s.screen_shake, s.classic
     );
     let _ = std::fs::write(path, txt);
 }
@@ -138,4 +150,13 @@ pub fn write_crash_log(msg: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(msg.as_bytes());
     }
+}
+
+/// Controller calibrations, one line per controller (see pad.rs for the format).
+pub fn load_pad_calibration() -> String {
+    std::fs::read_to_string(data_dir().join("controllers.txt")).unwrap_or_default()
+}
+
+pub fn save_pad_calibration(txt: &str) {
+    let _ = std::fs::write(data_dir().join("controllers.txt"), txt);
 }

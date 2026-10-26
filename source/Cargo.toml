@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 lewton = "0.9"
+gilrs = "0.11"
 macroquad = { version = "0.4", default-features = true, features = ["audio"] }
 
 [lints.rust]

@@ -73,7 +73,16 @@ pub struct Fx {
     pub star_amt: f32,
     /// 0..1 hyperspace warp intensity (between galaxy sectors)
     pub warp: f32,
+    /// 0 = normal blue-white warp, 1 = fire warp, 2 = reverse warp
+    pub warp_kind: u8,
+    /// 0..1 blend toward a fiery / icy-blue nebula (Classic rounds 7 and 8)
+    pub neb_fire: f32,
+    pub neb_blue: f32,
     ring_phase: f32,
+    /// -1..1 sideways motion of the ship; the starfield rolls the opposite way
+    pub roll_input: f32,
+    /// current roll speed (radians/second) — eases in and out for an inertia feel
+    roll_speed: f32,
 }
 
 const MAX_PARTICLES: usize = 4000;
@@ -95,7 +104,12 @@ impl Fx {
             nebula_amt: 1.0,
             star_amt: 1.0,
             warp: 0.0,
+            warp_kind: 0,
+            neb_fire: 0.0,
+            neb_blue: 0.0,
             ring_phase: 0.0,
+            roll_input: 0.0,
+            roll_speed: 0.0,
         }
     }
 
@@ -249,15 +263,28 @@ impl Fx {
         self.banners.retain(|b| b.life > 0.0);
         self.trauma = (self.trauma - dt * 1.6).max(0.0);
         self.flash = (self.flash - dt * 3.0).max(0.0);
+        // Like the original: steering left rolls the starfield to the right and vice versa.
+        // The roll builds up and coasts down smoothly; moving up/down leaves it alone.
+        self.roll_speed = approach(self.roll_speed, -self.roll_input * 1.3, 2.2, dt);
+        let (rs, rc) = (self.roll_speed * dt).sin_cos();
+        let (ax, ay) = (VW * 0.32, VH * 0.42);
         for s in self.stars.iter_mut() {
+            // rotate in screen space so the roll is circular, not squashed
+            let (x, y) = (s.p.x * ax, s.p.y * ay);
+            s.p.x = (x * rc - y * rs) / ax;
+            s.p.y = (x * rs + y * rc) / ay;
             s.p.z -= dt * star_speed;
             if s.p.z <= 0.02 {
                 s.p = vec3(rnd(-1.0, 1.0), rnd(-1.0, 1.0), 1.0);
+            } else if s.p.z > 1.0 {
+                // reverse warp: stars stream back in from the edges toward the centre
+                s.p = vec3(rnd(-1.0, 1.0), rnd(-1.0, 1.0), rnd(0.03, 0.2));
             }
         }
         self.nebula_scroll += vec2(4.0, 1.5) * dt;
-        // tunnel rings rush toward the viewer during a warp
-        self.ring_phase += dt * (0.25 + self.warp * 2.5);
+        // tunnel rings rush toward the viewer during a warp (away from it in reverse)
+        let dir = if self.warp_kind == 2 { -1.0 } else { 1.0 };
+        self.ring_phase = (self.ring_phase + dt * (0.25 + self.warp * 2.5 * dir)).rem_euclid(1.0);
     }
 
     pub fn shake_offset(&self, enabled: bool) -> Vec2 {
@@ -279,8 +306,19 @@ impl Fx {
         let warp = self.warp;
         let neb = self.nebula_amt;
         let zoom = 1.0 + warp * warp * 0.9;
-        let t1 = mix_color(hsv(hue, 0.65, 0.55 * intensity * neb, 1.0), Color::new(0.25, 0.3, 0.6, 1.0), warp * 0.5 * neb);
-        let t2 = hsv(hue + 140.0, 0.6, 0.35 * intensity, 1.0);
+        let (warp_tint, warp_hue, warp_sat) = match self.warp_kind {
+            1 => (Color::new(0.7, 0.25, 0.05, 1.0), 25.0, 0.85),
+            2 => (Color::new(0.4, 0.2, 0.6, 1.0), 275.0, 0.5),
+            _ => (Color::new(0.25, 0.3, 0.6, 1.0), -1.0, 0.0),
+        };
+        let mut t1 = hsv(hue, 0.65, 0.55 * intensity * neb, 1.0);
+        let mut t2 = hsv(hue + 140.0, 0.6, 0.35 * intensity, 1.0);
+        // Classic rounds 7 and 8: a faint fiery, then icy-blue, nebula
+        t1 = mix_color(t1, hsv(12.0, 0.9, 0.6 * intensity * neb, 1.0), self.neb_fire);
+        t2 = mix_color(t2, hsv(35.0, 0.9, 0.45 * intensity, 1.0), self.neb_fire);
+        t1 = mix_color(t1, hsv(215.0, 0.8, 0.55 * intensity * neb, 1.0), self.neb_blue);
+        t2 = mix_color(t2, hsv(185.0, 0.7, 0.4 * intensity, 1.0), self.neb_blue);
+        let t1 = mix_color(t1, warp_tint, warp * 0.5 * neb);
         let off = self.nebula_scroll;
         let layer = |w: f32, h: f32, dx: f32, dy: f32| (VW * 0.5 - w * zoom * 0.5 + dx, VH * 0.5 - h * zoom * 0.5 + dy, vec2(w * zoom, h * zoom));
         let (x, y, size) = layer(VW + 120.0, VH + 80.0, 0.0, 0.0);
@@ -316,11 +354,18 @@ impl Fx {
             let w = lerp(1.5 + z * 2.0, w_bass, bass_mix);
             let a = a * (1.0 + warp * 4.0);
             let w = w * (1.0 + warp * 1.5);
-            draw_circle_lines(c.x, c.y, r, w, hsv(hue + 40.0 - warp * 40.0, 0.7 - warp * 0.4, 1.0, a));
+            let ring_col = if warp_hue >= 0.0 {
+                mix_color(hsv(hue + 40.0, 0.7, 1.0, a), hsv(warp_hue, warp_sat, 1.0, a), warp)
+            } else {
+                hsv(hue + 40.0 - warp * 40.0, 0.7 - warp * 0.4, 1.0, a)
+            };
+            draw_circle_lines(c.x, c.y, r, w, ring_col);
         }
 
         // starfield streaks (perspective projection from screen centre)
-        let stars = if self.star_amt > 0.001 { &self.stars[..] } else { &[] };
+        // a warp always streaks the stars, even out of a starless sector
+        let star_vis = self.star_amt.max(self.warp);
+        let stars = if star_vis > 0.001 { &self.stars[..] } else { &[] };
         for s in stars.iter() {
             let z = s.p.z;
             let sx = c.x + s.p.x / z * VW * 0.32;
@@ -332,8 +377,12 @@ impl Fx {
             let z2 = (z + 0.012 + 0.03 * star_streak + pulse * 0.01 + warp * warp * 0.45).min(1.6);
             let px = c.x + s.p.x / z2 * VW * 0.32;
             let py = c.y + s.p.y / z2 * VH * 0.42;
-            let b = (((1.0 - z) * 0.9).clamp(0.05, 0.75) + warp * 0.5) * intensity * self.star_amt;
-            let col = hsv(s.hue - warp * 60.0, 0.35 - warp * 0.2, 1.0, b);
+            let b = (((1.0 - z) * 0.9).clamp(0.05, 0.75) + warp * 0.5) * intensity * star_vis;
+            let col = if warp_hue >= 0.0 {
+                mix_color(hsv(s.hue, 0.35, 1.0, b), hsv(warp_hue + s.hue * 0.1, warp_sat, 1.0, b), warp)
+            } else {
+                hsv(s.hue - warp * 60.0, 0.35 - warp * 0.2, 1.0, b)
+            };
             draw_line(px, py, sx, sy, (1.0 - z) * (1.6 + warp * 1.5) + 0.5, col);
         }
         gl_use_default_material();

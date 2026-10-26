@@ -53,8 +53,10 @@ pub enum Sfx {
     SatelliteLaunch,
     CapsuleSpawn,
     Warp,
+    WarpFire,
+    WarpReverse,
 }
-const SFX_COUNT: usize = 16;
+const SFX_COUNT: usize = 18;
 
 pub const MUSIC_FILES: [(Track, &[u8]); 5] = [
     (Track::Title, include_bytes!("../assets/music/title_orbital_drift.ogg")),
@@ -82,6 +84,8 @@ const SFX_FILES: [(Sfx, &[u8], f32, f32); SFX_COUNT] = [
     (Sfx::SatelliteLaunch, include_bytes!("../assets/sfx/satellite_launch.wav"), 0.4, 0.1),
     (Sfx::CapsuleSpawn, include_bytes!("../assets/sfx/capsule_spawn.wav"), 0.5, 0.2),
     (Sfx::Warp, include_bytes!("../assets/sfx/warp.wav"), 0.9, 2.0),
+    (Sfx::WarpFire, include_bytes!("../assets/sfx/warp_fire.wav"), 0.9, 2.0),
+    (Sfx::WarpReverse, include_bytes!("../assets/sfx/warp_reverse.wav"), 0.9, 2.0),
 ];
 
 struct Playing {
