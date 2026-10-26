@@ -75,7 +75,7 @@ pub struct Fx {
     pub warp: f32,
     /// 0 = normal blue-white warp, 1 = fire warp, 2 = reverse warp
     pub warp_kind: u8,
-    /// 0..1 blend toward a fiery / icy-blue nebula (Classic rounds 7 and 8)
+    /// 0..1 blend toward a fiery / icy-blue nebula (rounds 7 and 8)
     pub neb_fire: f32,
     pub neb_blue: f32,
     ring_phase: f32,
@@ -313,7 +313,7 @@ impl Fx {
         };
         let mut t1 = hsv(hue, 0.65, 0.55 * intensity * neb, 1.0);
         let mut t2 = hsv(hue + 140.0, 0.6, 0.35 * intensity, 1.0);
-        // Classic rounds 7 and 8: a faint fiery, then icy-blue, nebula
+        // Rounds 7 and 8: a faint fiery, then icy-blue, nebula
         t1 = mix_color(t1, hsv(12.0, 0.9, 0.6 * intensity * neb, 1.0), self.neb_fire);
         t2 = mix_color(t2, hsv(35.0, 0.9, 0.45 * intensity, 1.0), self.neb_fire);
         t1 = mix_color(t1, hsv(215.0, 0.8, 0.55 * intensity * neb, 1.0), self.neb_blue);

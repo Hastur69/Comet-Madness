@@ -218,8 +218,8 @@ impl App {
 
     fn scores(&self, m: Mode) -> &Vec<Entry> {
         match m {
-            Mode::Classic => &self.scores_classic,
-            Mode::Crazy => &self.scores_crazy,
+            Mode::MadPlanets => &self.scores_classic,
+            Mode::CrazyComets => &self.scores_crazy,
         }
     }
 
@@ -311,13 +311,13 @@ async fn main() {
         settings,
         scores_crazy: persist::load_scores(false),
         scores_classic: persist::load_scores(true),
-        last_mode: Mode::Crazy,
+        last_mode: Mode::CrazyComets,
         now_playing: (String::new(), 0.0),
         demo_world_hint: 0.0,
     };
 
-    // game mode comes from Options (saved in settings); --classic forces Classic for testing
-    app.last_mode = if args.classic || app.settings.classic { Mode::Classic } else { Mode::Crazy };
+    // game mode comes from Options (saved in settings); --classic forces Mad Planets for testing
+    app.last_mode = if args.classic || app.settings.classic { Mode::MadPlanets } else { Mode::CrazyComets };
     let mut state = if args.demo || args.start_play || args.showcase {
         let mut w = World::new(args.level, app.last_mode);
         if args.showcase {
@@ -519,8 +519,8 @@ async fn main() {
                 let row = rows[*sel];
                 match row {
                     OptRow::Mode if toggle => {
-                        app.last_mode = if app.last_mode == Mode::Classic { Mode::Crazy } else { Mode::Classic };
-                        app.settings.classic = app.last_mode == Mode::Classic;
+                        app.last_mode = if app.last_mode == Mode::MadPlanets { Mode::CrazyComets } else { Mode::MadPlanets };
+                        app.settings.classic = app.last_mode == Mode::MadPlanets;
                     }
                     OptRow::Music if d != 0.0 => {
                         app.settings.music_volume = (app.settings.music_volume + d).clamp(0.0, 1.0);
@@ -619,9 +619,9 @@ async fn main() {
             }
             State::Scores { t, mode, highlight } => {
                 *t += dt;
-                // left/right flips between the CLASSIC and CRAZY tables
+                // left/right flips between the MAD PLANETS and CRAZY COMETS tables
                 if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::Right) || pad::menu_left() || pad::menu_right() {
-                    *mode = if *mode == Mode::Classic { Mode::Crazy } else { Mode::Classic };
+                    *mode = if *mode == Mode::MadPlanets { Mode::CrazyComets } else { Mode::MadPlanets };
                     *highlight = None;
                     *t = 0.5;
                     app.audio.play(Sfx::UiSelect);
@@ -703,7 +703,7 @@ async fn main() {
                 }
                 if !*demo && world.game_over && world.game_over_t > 2.2 {
                     app.set_music(Track::GameOver);
-                    let w = std::mem::replace(world, World::new(1, Mode::Crazy));
+                    let w = std::mem::replace(world, World::new(1, Mode::CrazyComets));
                     next = Some(State::GameOver { world: w, t: 0.0 });
                 }
                 app.fx.roll_input = if world.player.alive && !*paused { (world.player.vel.x / 470.0).clamp(-1.0, 1.0) } else { 0.0 };
@@ -754,7 +754,7 @@ async fn main() {
                 }
                 if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) || (*t > 0.4 && (pad::confirm() || pad::start())) {
                     let name = String::from_utf8_lossy(letters).to_string();
-                    let classic = *mode == Mode::Classic;
+                    let classic = *mode == Mode::MadPlanets;
                     let table = if classic { &mut app.scores_classic } else { &mut app.scores_crazy };
                     let idx = persist::insert_score(table, Entry { name, score: *score, level: *level });
                     persist::save_scores(table, classic);
@@ -898,7 +898,7 @@ fn draw_title(app: &App, sel: usize, pulse: f32, t: f32) {
         x += w;
     }
     g.text_center("A NEON REBOOT OF THE 1985 COMMODORE 64 CLASSIC", VW * 0.5, 310.0, 16.0, Color::new(0.75, 0.9, 1.0, 0.9), false);
-    let mc = if app.last_mode == Mode::Classic { Color::new(0.5, 0.95, 1.0, 0.95) } else { Color::new(1.0, 0.5, 0.9, 0.95) };
+    let mc = if app.last_mode == Mode::MadPlanets { Color::new(0.5, 0.95, 1.0, 0.95) } else { Color::new(1.0, 0.5, 0.9, 0.95) };
     g.text_center(&format!("GAME MODE:  {}", app.last_mode.label()), VW * 0.5, 360.0, 18.0, mc, true);
     g.text_center("(CHANGE IN OPTIONS)", VW * 0.5, 382.0, 11.0, Color::new(0.7, 0.8, 1.0, 0.55), false);
 
@@ -971,7 +971,7 @@ fn draw_options(app: &App, sel: usize) {
                 hint = "ENTER / FIRE = CALIBRATE  -  BACKSPACE = BACK TO AUTO";
             }
             if *row == OptRow::Mode {
-                hint = "CLASSIC = LIKE THE 1985 ORIGINAL   -   CRAZY = THE REMIXED VERSION";
+                hint = "MAD PLANETS = RESCUE SPACEMEN, BONUS PHASES   -   CRAZY COMETS = CATCH THE CAPSULES";
             }
         }
         g.text(k, VW * 0.5 - 280.0, y, 20.0, c, on);
@@ -1063,14 +1063,14 @@ fn draw_howto(app: &App, t: f32) {
     gl_use_default_material();
     draw_line(x - 30.0, 478.0, x - 12.0, 478.0, 8.0, Color::new(0.92, 0.95, 1.0, 1.0));
     g.text_center(
-        "CLASSIC: like the 1985 original - Standard, Bonus and Extermination rounds in turn. Comets count as targets.",
+        "MAD PLANETS: rescue spacemen before they drift away. Every 3rd round ends with a comet-hunting bonus phase.",
         VW * 0.5,
         VH - 112.0,
         12.0,
         Color::new(0.5, 0.95, 1.0, 0.9),
         false,
     );
-    g.text_center("CRAZY: the remixed version - endless rounds with comets and rockets throughout.", VW * 0.5, VH - 94.0, 12.0, Color::new(1.0, 0.5, 0.9, 0.9), false);
+    g.text_center("CRAZY COMETS: one capsule at a time - it waits for you. Clear the planets to finish each round.", VW * 0.5, VH - 94.0, 12.0, Color::new(1.0, 0.5, 0.9, 0.9), false);
     g.text_center("PRESS ENTER", VW * 0.5, VH - 72.0, 14.0, Color::new(1.0, 1.0, 1.0, 0.6), false);
 }
 
@@ -1078,7 +1078,7 @@ fn draw_scores(app: &App, highlight: Option<usize>, t: f32, pulse: f32, mode: Mo
     let g = &app.g;
     draw_panel(VW * 0.5 - 360.0, 60.0, 720.0, 600.0, Color::new(1.0, 0.85, 0.3, 0.6));
     g.neon_text_center("HALL OF FAME", VW * 0.5, 120.0, 44.0, Color::new(1.0, 0.85, 0.35, 1.0), true);
-    let mc = if mode == Mode::Classic { Color::new(0.5, 0.95, 1.0, 1.0) } else { Color::new(1.0, 0.45, 0.9, 1.0) };
+    let mc = if mode == Mode::MadPlanets { Color::new(0.5, 0.95, 1.0, 1.0) } else { Color::new(1.0, 0.45, 0.9, 1.0) };
     g.text_center(&format!("<  {}  >", mode.label()), VW * 0.5, 158.0, 18.0, mc, true);
     g.text("RANK", VW * 0.5 - 300.0, 185.0, 12.0, Color::new(0.7, 0.8, 1.0, 0.6), false);
     g.text("NAME", VW * 0.5 - 170.0, 185.0, 12.0, Color::new(0.7, 0.8, 1.0, 0.6), false);

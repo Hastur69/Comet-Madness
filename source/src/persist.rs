@@ -17,7 +17,7 @@ pub struct Settings {
     pub crt: bool,
     pub fullscreen: bool,
     pub screen_shake: bool,
-    /// game mode chosen in Options: CLASSIC (true) or CRAZY (false)
+    /// game mode chosen in Options: MAD PLANETS (true) or CRAZY COMETS (false)
     pub classic: bool,
 }
 

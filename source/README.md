@@ -43,25 +43,24 @@ controller; Backspace on that row returns it to automatic.
 
 Choose the mode in **OPTIONS → GAME MODE**, then pick **PLAY** on the title screen.
 
-**CLASSIC** plays like the 1985 original. Rounds cycle through three stage types, getting harder every lap:
+Both modes simply get harder every round, forever. Planets are the only targets — clear them all to finish
+the round. From round 2 a single **comet** roams the screen (never more than one at a time), and each one
+that appears is angrier than the last: faster, quicker to start chasing you, and slower to give up. Lose a
+life and the screen is cleared while your ship returns — nothing you hadn't destroyed is credited.
 
-|Stage|Rounds|What happens|
-|-|-|-|
-|**Standard**|1, 4, 7, 10…|Planets only — no comets, no capsules|
-|**Bonus Round**|2, 5, 8, 11…|Planets and a few comets, plus one capsule at a time that drops in and bounces around until you catch it (200 each). Any left when the round ends fades away.|
-|**Extermination**|3, 6, 9, 12…|Hunting comets that keep coming, plus a few mad (mostly Nova) planets. No capsules.|
+**MAD PLANETS** (after Gottlieb's 1983 arcade game): from round 2, lost **spacemen** float in one or two
+at a time. They bounce around for a while and then drift off the screen — snooze, you lose (200 each).
+Every third round (3, 6, 9…) has a hidden second half: once the planets are gone, the round carries on with
+a comet and a crowd of spacemen (up to 3–4 at once). Destroy a set number of comets to move on (3 in round 3,
+one more each time, up to 8); each comet in that phase is worth 100 more than the one before, up to 1,000.
 
-Comets count toward the round's targets and are paced like Crazy mode's — well spaced early, tightening every round. Lose a life and the screen is cleared while your ship returns —
-nothing you hadn't destroyed is credited, so the round's remaining count stays the same.
+**CRAZY COMETS** (after the 1985 C64 game): from round 2 one **capsule** at a time drops in and bounces
+around until you catch it (200 each) or the round ends. No bonus phases.
 
-Classic's galaxy runs on a 9-round loop: rounds 1–3 *Comet Rush* with full nebula → **warp** →
-4–6 *Supernova Cascade* as the nebula fades away → **fire warp** → 7–9 *Crazy Comets* in a starless
-sector (faint fiery nebula, then faint blue, then the void) → **reverse warp** back to the start, with
-difficulty still climbing. Standard and Bonus rounds pulse the tunnel rings to the beat; Extermination
-rounds turn them into a bass visualizer.
-
-**CRAZY** is the remixed version: endless rounds with comets and rockets throughout, music changing
-every 4 rounds, warps after every 4th round and a void every 10th.
+Both modes share a 9-round galaxy loop: rounds 1–3 *Comet Rush* with full nebula → **warp** → 4–6
+*Supernova Cascade* as the nebula fades away → **fire warp** → 7–9 *Crazy Comets* in a starless sector
+(faint fiery nebula, then faint blue, then the void) → **reverse warp** back to the start, with difficulty
+still climbing. The tunnel rings pulse to the beat, and every third round they turn into a bass visualizer.
 
 Each mode keeps its own high-score table (switch tables with left/right on the HALL OF FAME screen).
 
@@ -73,7 +72,7 @@ Each mode keeps its own high-score table (switch tables with left/right on the H
 * **Worlds** (Earth-like) explode once you've hit them enough.
 * **Novas** (cratered) start glowing angrily when shot and moments later go wild, homing in fast. Finish them quickly.
 * Fully grown planets pick up an orbiting **satellite** that breaks off to attack.
-* From round 2, small **comets** streak about and start chasing you if left alone. Little **rockets** drift out with them — fly over one for 200 points (shooting them does nothing).
+* From round 2, a **comet** streaks about and starts chasing you if left alone — shoot it for 250. Fly over **spacemen** / **capsules** to collect them (shooting them does nothing).
 * Extra life every **10,000**. **Perfect Round** bonus if every planet dies before growing large and you don't lose a life. Quick kills build a small combo multiplier.
 * Leave the title screen alone for \~20 seconds to watch the attract-mode **demo**.
 
@@ -84,8 +83,9 @@ All music is original, composed and synthesized in code for this project by `too
 |Track|Style|Where|
 |-|-|-|
 |**Orbital Drift**|128 BPM melodic electro with a SID-style square lead (a nod to the C64)|Title, menus, high scores|
-|**Comet Rush**|128 BPM big-room electro: pumping sidechained supersaws, snare-roll builds, drops|Rounds 1–2, 5–6, 9–10…|
-|**Supernova Cascade**|140 BPM halftime dubstep: FM-growl wobble bass, risers, impacts, two drops|Rounds 3–4, 7–8, 11–12…|
+|**Comet Rush**|128 BPM big-room electro: pumping sidechained supersaws, snare-roll builds, drops|Rounds 1–3, 10–12, 19–21…|
+|**Supernova Cascade**|140 BPM halftime dubstep: FM-growl wobble bass, risers, impacts, two drops|Rounds 4–6, 13–15, 22–24…|
+|**Crazy Comets**|130 BPM|Rounds 7–9, 16–18, 25–27…|
 |**Last Light**|Game-over sting|Game over|
 
 The arena's tunnel, starfield, bloom and HUD all pulse with the beat of whichever track is playing.
@@ -102,7 +102,7 @@ CometMadness/
 ├─ build.rs              embeds the .exe icon on Windows
 ├─ src/
 │  ├─ main.rs            window, state machine, menus, screens
-│  ├─ game.rs            gameplay: ship, worlds, novas, satellites, comets, rockets
+│  ├─ game.rs            gameplay: ship, worlds, novas, satellites, comets, capsules, spacemen
 │  ├─ gfx.rs             shaders (planet, bloom, composite/CRT), procedural textures, text
 │  ├─ fx.rs              particles, shockwaves, starfield, screen shake, banners
 │  ├─ audio.rs           music crossfades, beat clock, SFX

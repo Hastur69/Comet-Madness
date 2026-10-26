@@ -100,10 +100,13 @@ pub struct Mini {
     pub age: f32,
     pub trail: VecDeque<Vec2>,
     pub alive: bool,
-    /// Classic: comets count as targets, so they never fly off and keep bouncing
+    /// bonus-phase comets stay until destroyed; normal ones eventually fly off
     pub persistent: bool,
-    /// Classic Extermination: hunts the ship relentlessly
-    pub aggressive: bool,
+    /// when it starts and stops chasing the ship (seconds of age)
+    pub chase_start: f32,
+    pub chase_end: f32,
+    /// chase turn rate (radians/second) — grows each time a comet appears
+    pub turn: f32,
 }
 
 pub struct Capsule {
@@ -113,48 +116,33 @@ pub struct Capsule {
     pub alive: bool,
     /// 1 = fully visible; below 1 it is fading out and can't be collected
     pub fade: f32,
-    /// Classic bonus capsules bounce around the screen until collected
+    /// capsules/spacemen bounce around the screen
     pub bouncy: bool,
     pub nose_up: bool,
+    /// Mad Planets spaceman (drawn as a little astronaut)
+    pub spaceman: bool,
+    /// age after which it stops bouncing and drifts off screen (spacemen only)
+    pub leave_t: f32,
 }
 
-/// CLASSIC plays like the 1985 original; CRAZY is the remixed version.
+/// MAD PLANETS (after Gottlieb's 1983 arcade game) or CRAZY COMETS (the 1985 C64 game).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
-    Classic,
-    Crazy,
+    MadPlanets,
+    CrazyComets,
 }
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
-            Mode::Classic => "CLASSIC",
-            Mode::Crazy => "CRAZY",
+            Mode::MadPlanets => "MAD PLANETS",
+            Mode::CrazyComets => "CRAZY COMETS",
         }
     }
 }
 
-/// Classic mode's three repeating stage types.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Stage {
-    Standard,
-    Bonus,
-    Extermination,
-}
-impl Stage {
-    pub fn of(level: u32) -> Stage {
-        match (level.max(1) - 1) % 3 {
-            0 => Stage::Standard,
-            1 => Stage::Bonus,
-            _ => Stage::Extermination,
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Stage::Standard => "STANDARD",
-            Stage::Bonus => "BONUS ROUND",
-            Stage::Extermination => "EXTERMINATION",
-        }
-    }
+/// Mad Planets: every third round has a bonus phase after its planets are cleared.
+pub fn has_bonus_phase(mode: Mode, l: u32) -> bool {
+    mode == Mode::MadPlanets && l % 3 == 0
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -180,52 +168,31 @@ pub struct Look {
     pub neb_style: NebStyle,
 }
 
-pub fn look_for(mode: Mode, l: u32) -> Look {
-    let l = l.max(1);
-    match mode {
-        Mode::Crazy => {
-            let cyc = (l - 1) % 10 + 1;
-            Look {
-                track: track_for_level(l),
-                bass_rings: ((l - 1) / 3) % 2 == 1,
-                nebula: match cyc {
-                    1..=6 => 1.0,
-                    7 => 0.6,
-                    8 => 0.3,
-                    9 => 0.08,
-                    _ => 0.0,
-                },
-                stars: if cyc == 10 { 0.0 } else { 1.0 },
-                neb_style: NebStyle::Normal,
-            }
-        }
-        Mode::Classic => {
-            // 9-round galaxy cycle: 1-3 nebula, 4-6 nebula fades away,
-            // 7-9 starless with a faint fiery then blue nebula, then the void
-            let c = (l - 1) % 9;
-            Look {
-                track: match c {
-                    0..=2 => Track::Rush,
-                    3..=5 => Track::Cascade,
-                    _ => Track::Crazy,
-                },
-                bass_rings: Stage::of(l) == Stage::Extermination,
-                nebula: match c {
-                    0..=2 => 1.0,
-                    3 => 0.65,
-                    4 => 0.3,
-                    5 => 0.0,
-                    6 | 7 => 0.35,
-                    _ => 0.0,
-                },
-                stars: if c <= 5 { 1.0 } else { 0.0 },
-                neb_style: match c {
-                    6 => NebStyle::Fire,
-                    7 => NebStyle::Blue,
-                    _ => NebStyle::Normal,
-                },
-            }
-        }
+/// Both modes share one 9-round galaxy loop: 1-3 nebula, 4-6 nebula fades away,
+/// 7-9 starless with a faint fiery then blue nebula, then the void.
+pub fn look_for(_mode: Mode, l: u32) -> Look {
+    let c = (l.max(1) - 1) % 9;
+    Look {
+        track: match c {
+            0..=2 => Track::Rush,
+            3..=5 => Track::Crazy,
+            _ => Track::Cascade,
+        },
+        bass_rings: c % 3 == 2,
+        nebula: match c {
+            0..=2 => 1.0,
+            3 => 0.65,
+            4 => 0.3,
+            5 => 0.0,
+            6 | 7 => 0.35,
+            _ => 0.0,
+        },
+        stars: if c <= 5 { 1.0 } else { 0.0 },
+        neb_style: match c {
+            6 => NebStyle::Fire,
+            7 => NebStyle::Blue,
+            _ => NebStyle::Normal,
+        },
     }
 }
 
@@ -233,21 +200,16 @@ pub fn track_for(mode: Mode, l: u32) -> Track {
     look_for(mode, l).track
 }
 
-/// Which warp (if any) plays after clearing round `l`.
-pub fn warp_after(mode: Mode, l: u32) -> Option<WarpKind> {
-    match mode {
-        Mode::Crazy => (l % 4 == 0).then_some(WarpKind::Normal),
-        Mode::Classic => {
-            if l % 3 != 0 {
-                return None;
-            }
-            Some(match (l / 3 - 1) % 3 {
-                0 => WarpKind::Normal,
-                1 => WarpKind::Fire,
-                _ => WarpKind::Reverse,
-            })
-        }
+/// Which warp (if any) plays after clearing round `l`: after 3, 6, 9, 12…
+pub fn warp_after(_mode: Mode, l: u32) -> Option<WarpKind> {
+    if l % 3 != 0 {
+        return None;
     }
+    Some(match (l / 3 - 1) % 3 {
+        0 => WarpKind::Normal,
+        1 => WarpKind::Fire,
+        _ => WarpKind::Reverse,
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -287,25 +249,18 @@ pub struct World {
     pub kills: u32,
     pub hue: f32,
     pub mode: Mode,
-    /// Classic: comets still to come this round (they count toward the round)
-    pub minis_to_spawn: u32,
     capsule_t: f32,
+    /// how many comets have appeared this round — each one is angrier than the last
+    comet_count: u32,
+    /// Mad Planets bonus phase (after the planets of rounds 3, 6, 9…)
+    pub bonus_phase: bool,
+    pub bonus_comets_left: u32,
+    bonus_value: u64,
 }
 
 pub const EXTRA_LIFE_EVERY: u64 = 10_000;
 const PLAYER_R: f32 = 12.0;
 const TOP: f32 = 62.0; // below the HUD bar
-
-pub fn track_for_level(l: u32) -> Track {
-    if (l.max(1) - 1) % 10 >= 8 {
-        return Track::Crazy;
-    }
-    if ((l.max(1) - 1) / 4) % 2 == 0 {
-        Track::Rush
-    } else {
-        Track::Cascade
-    }
-}
 
 struct LevelParams {
     count: u32,
@@ -319,13 +274,13 @@ struct LevelParams {
 fn params(l: u32) -> LevelParams {
     let lf = l as f32;
     LevelParams {
-        // gentle, endless ramp: rounds keep coming forever, getting steadily nastier
-        count: (6 + l).min(22),
-        max_alive: (2 + (l / 3) as usize).min(6),
-        interval: (2.4 - 0.08 * lf).max(0.9),
-        growth: (0.042 + 0.005 * lf).min(0.13),
-        speed: (1.0 + 0.035 * lf).min(1.8),
-        nova_chance: (0.2 + 0.03 * lf).min(0.5),
+        // a gentle, endless ramp shared by both modes
+        count: (6 + l * 2 / 3).min(20),
+        max_alive: (2 + (l / 5) as usize).min(5),
+        interval: (2.1 - 0.05 * lf).max(1.1),
+        growth: (0.06 + 0.0025 * lf).min(0.1),
+        speed: (1.0 + 0.02 * lf).min(1.6),
+        nova_chance: (0.2 + 0.015 * lf).min(0.45),
     }
 }
 
@@ -344,7 +299,7 @@ impl Comet {
         self.growth >= 0.3 || self.crazy
     }
     fn max_hp(&self, level: u32) -> f32 {
-        1.0 + (self.growth * 11.0).floor() + (level / 4) as f32
+        1.0 + (self.growth * 11.0).floor() + (level / 5) as f32
     }
 }
 
@@ -389,8 +344,11 @@ impl World {
             kills: 0,
             hue: 0.0,
             mode,
-            minis_to_spawn: 0,
             capsule_t: 0.0,
+            comet_count: 0,
+            bonus_phase: false,
+            bonus_comets_left: 0,
+            bonus_value: 300,
         };
         w.begin_level(None);
         w
@@ -405,28 +363,14 @@ impl World {
         self.to_spawn = p.count;
         self.spawn_t = 0.4;
         self.mini_t = rnd(5.0, 8.0);
+        self.capsule_t = rnd(3.0, 5.0);
+        self.comet_count = 0;
+        self.bonus_phase = false;
+        self.bonus_comets_left = 0;
         self.perfect = true;
         self.phase = Phase::Intro;
         self.phase_t = 2.0;
-        self.minis_to_spawn = 0;
-        if self.mode == Mode::Classic {
-            let l = self.level;
-            match Stage::of(l) {
-                Stage::Standard => {}
-                Stage::Bonus => {
-                    self.to_spawn = (p.count * 2 / 3).max(4);
-                    self.minis_to_spawn = (1 + l / 3).min(6);
-                    self.mini_t = rnd(3.0, 5.0);
-                    self.capsule_t = rnd(1.5, 3.0);
-                }
-                Stage::Extermination => {
-                    self.to_spawn = (2 + l / 5).min(6);
-                    self.minis_to_spawn = (4 + l / 2).min(16);
-                    self.mini_t = 1.5;
-                }
-            }
-        }
-        // the original changes the planets' colours every level
+        // the original changes the planets' colours every round
         self.hue = 280.0 + self.level as f32 * 53.0;
         if let Some(fx) = fx {
             self.first_banner(fx);
@@ -434,31 +378,21 @@ impl World {
     }
 
     pub fn first_banner(&mut self, fx: &mut Fx) {
-        if self.mode == Mode::Classic {
-            let st = Stage::of(self.level);
-            let (sub, col) = match st {
-                Stage::Standard => ("DESTROY THE PLANETS", hsv(self.hue, 0.5, 1.0, 1.0)),
-                Stage::Bonus => ("CATCH THE BOUNCING CAPSULES", Color::new(1.0, 0.85, 0.3, 1.0)),
-                Stage::Extermination => ("THE COMETS SWARM", Color::new(1.0, 0.35, 0.4, 1.0)),
-            };
-            fx.banner(st.label(), &format!("ROUND {}  -  {}", self.level, sub), col, 2.2);
-            return;
-        }
-        let sub = match self.level {
-            1 => "SHOOT THE PLANETS WHILE THEY ARE SMALL",
-            2 => "COMETS AND LOST ROCKETS INBOUND",
+        let sub = match (self.level, self.mode) {
+            (1, _) => "SHOOT THE PLANETS WHILE THEY ARE SMALL",
+            (2, Mode::MadPlanets) => "RESCUE THE LOST SPACEMEN",
+            (2, Mode::CrazyComets) => "CATCH THE LOST CAPSULES",
             _ => "THE UNIVERSE IS COLLAPSING",
         };
         fx.banner(&format!("ROUND {}", self.level), sub, hsv(self.hue, 0.5, 1.0, 1.0), 2.2);
     }
 
+    /// What the HUD's "LEFT" counter shows: planets, or comets during a bonus phase.
     pub fn comets_remaining(&self) -> u32 {
-        let planets = self.to_spawn + self.comets.iter().filter(|c| c.alive).count() as u32;
-        if self.mode == Mode::Classic {
-            planets + self.minis_to_spawn + self.minis.iter().filter(|m| m.alive).count() as u32
-        } else {
-            planets
+        if self.bonus_phase {
+            return self.bonus_comets_left;
         }
+        self.to_spawn + self.comets.iter().filter(|c| c.alive).count() as u32
     }
 
     fn mult(&self) -> u64 {
@@ -494,9 +428,7 @@ impl World {
         let y = rnd(TOP + 40.0, VH * 0.62);
         let pos = vec2(if left { -10.0 } else { VW + 10.0 }, y);
         let ang = rnd(-0.45, 0.45) + if left { 0.0 } else { std::f32::consts::PI };
-        // Classic Extermination is a "mad planets" round: mostly Novas
-        let nova_chance = if self.mode == Mode::Classic && Stage::of(self.level) == Stage::Extermination { 0.75 } else { p.nova_chance };
-        let kind = if chance(nova_chance) { Kind::Nova } else { Kind::World };
+        let kind = if chance(p.nova_chance) { Kind::Nova } else { Kind::World };
         let id = self.next_id;
         self.next_id += 1;
         self.comets.push(Comet {
@@ -526,6 +458,7 @@ impl World {
         let _ = fx;
     }
 
+    /// The comet: only ever one at a time, and each one this round is angrier than the last.
     fn spawn_mini(&mut self) {
         let side = rndi(0, 3);
         let (pos, dir) = match side {
@@ -533,9 +466,9 @@ impl World {
             1 => (vec2(VW + 30.0, rnd(TOP + 30.0, VH * 0.5)), vec2(-1.0, rnd(-0.2, 0.6))),
             _ => (vec2(rnd(120.0, VW - 120.0), TOP - 20.0), vec2(rnd(-0.6, 0.6), 1.0)),
         };
-        let sp = rnd(430.0, 520.0) * (1.0 + 0.03 * self.level as f32).min(1.4);
-        let classic = self.mode == Mode::Classic;
-        let aggressive = classic && Stage::of(self.level) == Stage::Extermination;
+        let anger = self.comet_count as f32 + self.level as f32 * 0.35;
+        self.comet_count += 1;
+        let sp = rnd(400.0, 480.0) * (1.0 + 0.04 * anger).min(1.5);
         self.minis.push(Mini {
             pos,
             vel: dir.normalize() * sp,
@@ -543,44 +476,34 @@ impl World {
             age: 0.0,
             trail: VecDeque::new(),
             alive: true,
-            persistent: classic,
-            aggressive,
+            persistent: self.bonus_phase,
+            chase_start: (2.5 - 0.15 * anger).max(0.8),
+            chase_end: (7.0 + 0.6 * anger).min(14.0),
+            turn: (1.5 + 0.12 * anger).min(3.0),
         });
-        // Crazy: a small rocket often drifts out with the comet
-        if !classic && chance(0.6) && self.capsules.len() < 2 {
-
-            // Original left side entry
-            //let fromleft = chance(0.5);
-            //let cp = vec2(if fromleft { -30.0 } else { VW + 30.0 }, rnd(VH * 0.35, VH - 60.0));
-            //let cv = vec2(if fromleft { 1.0 } else { -1.0 } * rnd(70.0, 110.0), rnd(-20.0, 20.0));
-
-            // rockets always enter from the top edge and fall nose-first
-            let cp = vec2(rnd(80.0, VW - 80.0), -30.0);
-            let cv = vec2(rnd(-25.0, 25.0), rnd(90.0, 130.0));
-
-            self.capsules.push(Capsule { pos: cp, vel: cv, t: 0.0, alive: true, fade: 1.0, bouncy: false, nose_up: false });
-            self.sfx(Sfx::CapsuleSpawn, 1.0);
-        }
     }
 
-    /// Classic bonus capsule: drops in from the top, then bounces around until collected.
-    fn spawn_capsule_classic(&mut self) {
+    /// Mad Planets spaceman: bounces around for a while, then drifts off — snooze, you lose.
+    /// Crazy Comets capsule: bounces around until collected or the round ends.
+    fn spawn_capsule(&mut self) {
+        let spaceman = self.mode == Mode::MadPlanets;
         let cp = vec2(rnd(80.0, VW - 80.0), -30.0);
         let cv = vec2(rnd(-90.0, 90.0), rnd(150.0, 220.0));
-        self.capsules.push(Capsule { pos: cp, vel: cv, t: rnd(0.0, 6.0), alive: true, fade: 1.0, bouncy: true, nose_up: true });
+        let leave_t = if spaceman { rnd(7.0, 11.0) } else { f32::INFINITY };
+        self.capsules.push(Capsule { pos: cp, vel: cv, t: 0.0, alive: true, fade: 1.0, bouncy: true, nose_up: true, spaceman, leave_t });
         self.sfx(Sfx::CapsuleSpawn, 1.0);
     }
 
     fn spawn_satellite(&mut self, parent: u32, i: usize) {
         self.sats.push(Satellite {
             parent: Some(parent),
-            orbit_r: 90.0 + i as f32 * 20.0,
+            orbit_r: 14.0 + (i % 2) as f32 * 12.0,
             orbit_a: rnd(0.0, 6.28),
             orbit_speed: rnd(1.6, 2.4) * if i % 2 == 0 { 1.0 } else { -1.0 },
             pos: Vec2::ZERO,
             vel: Vec2::ZERO,
             attacking: false,
-            detach_t: rnd(2.5, 4.5) - (self.level as f32 * 0.12).min(1.5),
+            detach_t: rnd(3.5, 5.5) - (self.level as f32 * 0.06).min(1.2),
             life: 0.0,
             alive: true,
         });
@@ -611,7 +534,7 @@ impl World {
         self.spawn_mini();
         self.minis[0].pos = vec2(300.0, 470.0);
         self.minis[0].vel = vec2(500.0, -80.0);
-        self.capsules.push(Capsule { pos: vec2(900.0, 560.0), vel: Vec2::ZERO, t: 0.0, alive: true, fade: 1.0, bouncy: false, nose_up: self.mode == Mode::Classic });
+        self.capsules.push(Capsule { pos: vec2(900.0, 560.0), vel: Vec2::ZERO, t: 0.0, alive: true, fade: 1.0, bouncy: false, nose_up: true, spaceman: self.mode == Mode::MadPlanets, leave_t: f32::INFINITY });
         self.player.pos = vec2(640.0, 600.0);
         self.player.invuln = 0.0;
         for k in 0..5 {
@@ -663,6 +586,13 @@ impl World {
                 c.vel.x += (c.t * 1.3).sin() * 60.0 * dt;
                 c.vel = c.vel.clamp_length_max(280.0);
                 c.pos += c.vel * dt;
+                if c.t > c.leave_t {
+                    // done bouncing: let it sail off whichever edge it reaches
+                    if c.pos.x < -60.0 || c.pos.x > VW + 60.0 || c.pos.y < -60.0 || c.pos.y > VH + 60.0 {
+                        c.alive = false;
+                    }
+                    continue;
+                }
                 if c.pos.x < 24.0 {
                     c.pos.x = 24.0;
                     c.vel.x = c.vel.x.abs();
@@ -710,28 +640,7 @@ impl World {
                 if self.game_over {
                     return;
                 }
-                if self.mode == Mode::Classic {
-                    self.update_phase_classic(dt, fx);
-                    return;
-                }
-                let p = params(self.level);
-                let alive = self.comets.len();
-                self.spawn_t -= dt;
-                if self.to_spawn > 0 && alive < p.max_alive && (self.spawn_t <= 0.0 || alive == 0) {
-                    self.spawn_comet(fx);
-                    self.to_spawn -= 1;
-                    self.spawn_t = p.interval * rnd(0.8, 1.25);
-                }
-                if self.level >= 2 {
-                    self.mini_t -= dt;
-                    if self.mini_t <= 0.0 {
-                        self.mini_t = (rnd(7.0, 11.0) - 0.25 * self.level as f32).max(3.5);
-                        self.spawn_mini();
-                    }
-                }
-                if self.to_spawn == 0 && self.comets.is_empty() && self.player.alive {
-                    self.finish_level(fx);
-                }
+                self.update_round(dt, fx);
             }
             Phase::Clear => {
                 self.phase_t -= dt;
@@ -743,54 +652,79 @@ impl World {
         }
     }
 
-    /// Classic spawning: planets, comets and (in bonus rounds) capsules.
-    /// Nothing new arrives while the ship is respawning.
-    fn update_phase_classic(&mut self, dt: f32, fx: &mut Fx) {
-        let p = params(self.level);
-        let l = self.level;
-        let stage = Stage::of(l);
+    /// Spawning for a round. Nothing new arrives while the ship is respawning.
+    fn update_round(&mut self, dt: f32, fx: &mut Fx) {
         if !self.player.alive {
             return;
         }
-        let alive = self.comets.len();
-        self.spawn_t -= dt;
-        if self.to_spawn > 0 && alive < p.max_alive && self.spawn_t <= 0.0 {
-            self.spawn_comet(fx);
-            self.to_spawn -= 1;
-            self.spawn_t = p.interval * rnd(0.8, 1.25);
-        }
-        // Comet pacing follows Crazy mode's curve: well spaced early, tightening every round.
-        // Extermination simply runs a bit hotter and allows more on screen as rounds go by.
-        let (max_minis, gap) = match stage {
-            Stage::Standard => (0usize, 99.0),
-            Stage::Bonus => ((1 + l / 12).min(2) as usize, (rnd(7.0, 11.0) - 0.25 * l as f32).max(3.5)),
-            Stage::Extermination => ((1 + l / 4).min(4) as usize, (rnd(4.0, 6.5) - 0.2 * l as f32).max(2.0)),
-        };
-        self.mini_t -= dt;
-        if self.minis_to_spawn > 0 && self.minis.len() < max_minis && self.mini_t <= 0.0 {
-            self.spawn_mini();
-            self.minis_to_spawn -= 1;
-            self.mini_t = gap;
-        }
-        if stage == Stage::Bonus {
-            self.capsule_t -= dt;
-            // only one capsule on screen at a time; the next drops in a few seconds after
-            if self.capsules.iter().any(|c| c.fade >= 1.0) {
-                self.capsule_t = self.capsule_t.max(rnd(3.0, 5.0));
-            } else if self.capsule_t <= 0.0 {
-                self.spawn_capsule_classic();
-                self.capsule_t = rnd(3.0, 5.0);
+        let l = self.level;
+        let p = params(l);
+        if !self.bonus_phase {
+            let alive = self.comets.len();
+            self.spawn_t -= dt;
+            if self.to_spawn > 0 && alive < p.max_alive && (self.spawn_t <= 0.0 || alive == 0) {
+                self.spawn_comet(fx);
+                self.to_spawn -= 1;
+                self.spawn_t = p.interval * rnd(0.8, 1.25);
             }
         }
-        if self.to_spawn == 0 && self.minis_to_spawn == 0 && self.comets.is_empty() && self.minis.is_empty() {
-            self.finish_level(fx);
+        // ---- the comet: one at a time, from round 2 (and throughout a bonus phase)
+        if l >= 2 || self.bonus_phase {
+            if self.minis.is_empty() {
+                self.mini_t -= dt;
+                if self.mini_t <= 0.0 {
+                    self.spawn_mini();
+                    self.mini_t = if self.bonus_phase { rnd(1.0, 2.0) } else { (rnd(6.0, 10.0) - 0.15 * l as f32).max(4.0) };
+                }
+            }
+        }
+        // ---- capsules / spacemen from round 2
+        if l >= 2 {
+            let live = self.capsules.iter().filter(|c| c.fade >= 1.0 && c.t <= c.leave_t).count();
+            let max_live = match (self.mode, self.bonus_phase) {
+                (Mode::CrazyComets, _) => 1,
+                (Mode::MadPlanets, false) => 2,
+                (Mode::MadPlanets, true) => (3 + l / 9).min(4) as usize,
+            };
+            self.capsule_t -= dt;
+            if live < max_live && self.capsule_t <= 0.0 {
+                self.spawn_capsule();
+                self.capsule_t = match (self.mode, self.bonus_phase) {
+                    (_, true) => rnd(0.8, 1.6),
+                    (Mode::MadPlanets, false) => rnd(4.0, 8.0),
+                    (Mode::CrazyComets, false) => rnd(3.0, 5.0),
+                };
+            } else if self.mode == Mode::CrazyComets && live >= max_live {
+                // Crazy Comets: the next capsule drops in a few seconds after this one's caught
+                self.capsule_t = self.capsule_t.max(rnd(3.0, 5.0));
+            }
+        }
+        // ---- end of round
+        if self.bonus_phase {
+            if self.bonus_comets_left == 0 {
+                self.finish_level(fx);
+            }
+        } else if self.to_spawn == 0 && self.comets.is_empty() {
+            if has_bonus_phase(self.mode, l) {
+                // Mad Planets: straight into the bonus phase — no announcement
+                self.bonus_phase = true;
+                self.bonus_comets_left = (2 + l / 3).min(8);
+                self.bonus_value = 300;
+                self.comet_count = 0;
+                self.minis.clear();
+                self.mini_t = 1.2;
+                self.capsule_t = 0.3;
+            } else {
+                self.finish_level(fx);
+            }
         }
     }
 
     fn finish_level(&mut self, fx: &mut Fx) {
-        // leftover bonus capsules fade away, lost until the next bonus round
+        // leftover capsules / spacemen fade away
+        self.bonus_phase = false;
         for c in self.capsules.iter_mut() {
-            if c.bouncy && c.fade >= 1.0 {
+            if c.fade >= 1.0 {
                 c.fade = 0.999;
             }
         }
@@ -904,7 +838,7 @@ impl World {
                 if c.growth > 0.55 {
                     self.perfect = false;
                 }
-                if c.growth >= 1.0 && !c.grown {
+                if c.growth >= 0.4 && !c.grown {
                     c.grown = true;
                     new_sats.push(c.id);
                 }
@@ -942,7 +876,7 @@ impl World {
             } else if c.growth < 0.3 {
                 0.15
             } else {
-                0.3 + (1.1 + 0.04 * self.level.min(12) as f32) * (c.growth - 0.3) / 0.7
+                0.3 + (1.1 + 0.02 * self.level.min(15) as f32) * (c.growth - 0.3) / 0.7
             };
             let turn = c.curve * (1.0 - c.growth * 0.6) + homing * side.signum() * side.abs().sqrt();
             dir = rot(dir, turn * dt);
@@ -978,9 +912,20 @@ impl World {
             }
         }
         for id in new_sats {
-            let n = if self.level >= 5 { 2 } else { 1 };
-            for i in 0..n {
-                self.spawn_satellite(id, i);
+            match self.mode {
+                Mode::CrazyComets => {
+                    // C64 sprite limit: only one satellite on screen at a time, from round 2
+                    if self.level >= 2 && !self.sats.iter().any(|s| s.alive) {
+                        self.spawn_satellite(id, 0);
+                    }
+                }
+                Mode::MadPlanets => {
+                    // arcade: a grown planet gets a whole cluster of moons, even in round 1
+                    let n = if chance(0.25) { 6 } else { rndi(2, 5) as usize };
+                    for i in 0..n {
+                        self.spawn_satellite(id, i);
+                    }
+                }
             }
         }
         for pos in wild {
@@ -995,14 +940,15 @@ impl World {
         let ppos = self.player.pos;
         let mut launched = false;
         for i in 0..self.sats.len() {
-            let parent_pos = self.sats[i].parent.and_then(|id| self.comets.iter().find(|c| c.id == id && c.alive).map(|c| c.pos));
+            //let parent_pos = self.sats[i].parent.and_then(|id| self.comets.iter().find(|c| c.id == id && c.alive).map(|c| c.pos));
+            let parent_pos = self.sats[i].parent.and_then(|id| self.comets.iter().find(|c| c.id == id && c.alive).map(|c| (c.pos, c.radius())));
             let s = &mut self.sats[i];
             s.life += dt;
             if !s.attacking {
                 match parent_pos {
-                    Some(pp) => {
+                    Some((pp, pr)) => {
                         s.orbit_a += s.orbit_speed * dt;
-                        let target = pp + from_angle(s.orbit_a) * s.orbit_r;
+                        let target = pp + from_angle(s.orbit_a) * (pr + s.orbit_r);
                         s.pos = if s.life < 0.5 { pp + (target - pp) * (s.life / 0.5) } else { target };
                         s.detach_t -= dt;
                         if s.detach_t <= 0.0 {
@@ -1046,42 +992,16 @@ impl World {
     fn update_minis(&mut self, dt: f32) {
         let ppos = self.player.pos;
         let palive = self.player.alive;
-        let hunt_turn = (1.6 + 0.06 * self.level as f32).min(3.0);
         for m in self.minis.iter_mut() {
             m.age += dt;
             let sp = m.vel.length();
             let mut dir = m.vel / sp.max(1.0);
-            if m.persistent {
-                // Classic: comets stay until destroyed. Aggressive ones hunt constantly,
-                // others alternate between wandering and chasing.
-                let hunting = palive && m.age > 1.5 && (m.aggressive || (m.age % 6.0) > 2.5);
-                let turn = if hunting {
-                    let to_p = (ppos - m.pos).normalize_or_zero();
-                    dir.perp_dot(to_p).signum() * if m.aggressive { hunt_turn } else { 2.0 }
-                } else {
-                    m.curve
-                };
-                dir = rot(dir, turn * dt);
-                m.vel = dir * sp;
-                m.pos += m.vel * dt;
-                m.trail.push_front(m.pos);
-                if m.trail.len() > 22 {
-                    m.trail.pop_back();
-                }
-                if m.age > 0.8 {
-                    if m.pos.x < 10.0 && m.vel.x < 0.0 || m.pos.x > VW - 10.0 && m.vel.x > 0.0 {
-                        m.vel.x = -m.vel.x;
-                    }
-                    if m.pos.y < TOP && m.vel.y < 0.0 || m.pos.y > VH - 10.0 && m.vel.y > 0.0 {
-                        m.vel.y = -m.vel.y;
-                    }
-                }
-                continue;
-            }
-            // left alone for a few seconds, a comet starts chasing you
-            let turn = if m.age > 2.5 && m.age < 9.0 && palive {
+            // left alone for a moment, the comet chases you; bonus-phase comets never give up
+            // bonus-phase comets hunt in bursts (3.5s on, 2.5s off) so there's room to breathe
+            let chasing_window = m.age > m.chase_start && if m.persistent { (m.age - m.chase_start) % 6.0 < 3.5 } else { m.age < m.chase_end };
+            let turn = if chasing_window && palive {
                 let to_p = (ppos - m.pos).normalize_or_zero();
-                dir.perp_dot(to_p).signum() * 2.0
+                dir.perp_dot(to_p).signum() * m.turn
             } else {
                 m.curve
             };
@@ -1092,16 +1012,15 @@ impl World {
             if m.trail.len() > 22 {
                 m.trail.pop_back();
             }
-            if m.age < 9.0 {
-                // bounce inside the arena while hunting
-                if m.pos.x < 10.0 && m.vel.x < 0.0 && m.age > 0.8 {
-                    m.vel.x = -m.vel.x;
-                }
-                if m.pos.x > VW - 10.0 && m.vel.x > 0.0 && m.age > 0.8 {
-                    m.vel.x = -m.vel.x;
-                }
-                if m.pos.y < TOP && m.vel.y < 0.0 && m.age > 0.8 {
-                    m.vel.y = -m.vel.y;
+            if m.persistent || m.age < m.chase_end {
+                // bounce inside the arena while it's hunting
+                if m.age > 0.8 {
+                    if m.pos.x < 10.0 && m.vel.x < 0.0 || m.pos.x > VW - 10.0 && m.vel.x > 0.0 {
+                        m.vel.x = -m.vel.x;
+                    }
+                    if m.pos.y < TOP && m.vel.y < 0.0 {
+                        m.vel.y = -m.vel.y;
+                    }
                 }
                 if m.pos.y > VH - 10.0 && m.vel.y > 0.0 {
                     m.vel.y = -m.vel.y;
@@ -1180,9 +1099,9 @@ impl World {
         fx.flash(0.5, Color::new(1.0, 0.3, 0.4, 1.0));
         self.slowmo_t = 0.6;
         self.sfx(Sfx::PlayerDie, 1.0);
-        if self.mode == Mode::Classic {
-            // Like the original: the screen is cleared while the ship returns. Nothing is
-            // credited — every enemy goes back into the round's remaining count.
+        {
+            // Like the originals: the screen is cleared while the ship returns. Nothing is
+            // credited — every planet goes back into the round's remaining count.
             let respawn = self.player.respawn_t;
             for c in self.comets.iter().filter(|c| c.alive) {
                 fx.ring(c.pos, 220.0, 0.4, 3.0, Color::new(0.7, 0.8, 1.0, 0.6));
@@ -1190,13 +1109,12 @@ impl World {
             }
             for m in self.minis.iter().filter(|m| m.alive) {
                 fx.ring(m.pos, 160.0, 0.3, 2.0, Color::new(0.6, 0.9, 1.0, 0.6));
-                self.minis_to_spawn += 1;
             }
             self.comets.clear();
             self.minis.clear();
             self.sats.clear();
             self.spawn_t = respawn + 0.8;
-            self.mini_t = respawn + 1.5;
+            self.mini_t = respawn + if self.bonus_phase { 1.2 } else { rnd(3.0, 6.0) };
         }
         self.lives = self.lives.saturating_sub(1);
         if self.lives == 0 {
@@ -1245,7 +1163,16 @@ impl World {
                         let mp = self.minis[mi].pos;
                         fx.explode(mp, 0.25, Color::new(0.5, 0.9, 1.0, 1.0), WHITE);
                         self.sfx(Sfx::ExplodeSmall, 0.9);
-                        self.register_kill(250, mp, fx, Color::new(0.6, 0.95, 1.0, 1.0));
+                        let value = if self.bonus_phase {
+                            // bonus phase: each comet is worth more than the last
+                            self.bonus_comets_left = self.bonus_comets_left.saturating_sub(1);
+                            let v = self.bonus_value;
+                            self.bonus_value = (self.bonus_value + 100).min(1000);
+                            v
+                        } else {
+                            250
+                        };
+                        self.register_kill(value, mp, fx, Color::new(0.6, 0.95, 1.0, 1.0));
                         consumed = true;
                         break;
                     }
@@ -1267,7 +1194,7 @@ impl World {
                 continue;
             }
             // forgiving hitbox: just clipping the edge with the ship's nose is survivable
-            let r = c.radius() * 0.8 + PLAYER_R;
+            let r = c.radius() * 0.87 + PLAYER_R;
             if c.pos.distance_squared(pp) < r * r {
                 self.kill_player(fx);
                 return;
@@ -1426,6 +1353,41 @@ impl World {
         let blink = ((c.t * 6.0).sin() > 0.0) as i32 as f32;
         let p = c.pos;
         let fa = c.fade.clamp(0.0, 1.0);
+        if c.spaceman {
+            // a little tumbling astronaut, waving for rescue
+            let ang = (c.t * 1.7).sin() * 0.5 + c.vel.x * 0.0015;
+            let q = |x: f32, y: f32| p + rot(vec2(x, y), ang);
+            gl_use_material(&g.additive);
+            g.glow_at(p, 34.0, Color::new(0.5, 0.9, 1.0, (0.22 + 0.15 * blink) * fa));
+            gl_use_default_material();
+            let suit = Color::new(0.95, 0.96, 1.0, fa);
+            let trim = Color::new(1.0, 0.55, 0.25, fa);
+            let wave = (c.t * 9.0).sin() * 4.0;
+            let line = |a: Vec2, b: Vec2, w: f32, col: Color| draw_line(a.x, a.y, b.x, b.y, w, col);
+            // backpack
+            let bp = q(0.0, 2.0);
+            draw_rectangle_ex(bp.x, bp.y, 16.0, 14.0, DrawRectangleParams { offset: vec2(0.5, 0.5), rotation: ang, color: Color::new(0.6, 0.65, 0.75, fa) });
+            // legs, arms (one waving), body
+            line(q(-3.0, 6.0), q(-6.0, 17.0), 5.0, suit);
+            line(q(3.0, 6.0), q(6.0, 17.0), 5.0, suit);
+            line(q(-5.0, -2.0), q(-14.0, 4.0), 4.0, suit);
+            line(q(5.0, -2.0), q(13.0, -10.0 + wave), 4.0, suit);
+            let b0 = q(0.0, -4.0);
+            let b1 = q(0.0, 7.0);
+            line(b0, b1, 11.0, suit);
+            line(q(-5.5, 3.0), q(5.5, 3.0), 2.0, trim); // belt
+            // helmet + visor
+            let h = q(0.0, -11.0);
+            draw_circle(h.x, h.y, 7.5, suit);
+            let v = q(1.5, -11.5);
+            draw_circle(v.x, v.y, 4.5, Color::new(0.25, 0.55, 1.0, fa));
+            if blink > 0.0 {
+                gl_use_material(&g.additive);
+                g.glow_at(q(0.0, -19.0), 7.0, Color::new(1.0, 0.4, 0.3, fa));
+                gl_use_default_material();
+            }
+            return;
+        }
         let facing = if c.nose_up { -1.0 } else { 1.0 };
         // pt(along, across): `along` points the way the rocket faces
         let pt = |along: f32, across: f32| vec2(p.x + across, p.y + along * facing);
@@ -1512,11 +1474,7 @@ impl World {
         g.text(&fmt_score(self.score), 20.0, 46.0, 26.0, WHITE, true);
         g.text_center("HI-SCORE", VW * 0.5, 20.0, 12.0, dim, false);
         g.text_center(&fmt_score(hiscore.max(self.score)), VW * 0.5, 46.0, 24.0, Color::new(1.0, 0.85, 0.4, 1.0), true);
-        let round_label = if self.mode == Mode::Classic {
-            format!("ROUND {}  -  {}", self.level, Stage::of(self.level).label())
-        } else {
-            format!("ROUND {}", self.level)
-        };
+        let round_label = format!("ROUND {}", self.level);
         g.text(&round_label, 290.0, 20.0, 12.0, dim, false);
         g.text(&format!("{} LEFT", self.comets_remaining()), 290.0, 44.0, 18.0, hsv(self.hue, 0.5, 1.0, 1.0), true);
         for i in 0..self.lives.min(8) {
