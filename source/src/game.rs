@@ -152,6 +152,9 @@ const PLAYER_R: f32 = 12.0;
 const TOP: f32 = 62.0; // below the HUD bar
 
 pub fn track_for_level(l: u32) -> Track {
+    if (l.max(1) - 1) % 10 >= 8 {
+        return Track::Crazy;
+    }
     if ((l.max(1) - 1) / 4) % 2 == 0 {
         Track::Rush
     } else {

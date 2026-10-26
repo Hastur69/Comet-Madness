@@ -7,6 +7,7 @@ pub enum Track {
     Title,
     Rush,
     Cascade,
+    Crazy,
     GameOver,
 }
 
@@ -16,6 +17,7 @@ impl Track {
             Track::Title | Track::Rush => 128.0,
             Track::Cascade => 140.0,
             Track::GameOver => 100.0,
+            Track::Crazy => 130.0,
         }
     }
     pub fn looped(self) -> bool {
@@ -26,6 +28,7 @@ impl Track {
             Track::Title => "ORBITAL DRIFT",
             Track::Rush => "COMET RUSH",
             Track::Cascade => "SUPERNOVA CASCADE",
+            Track::Crazy => "CRAZY COMETS",
             Track::GameOver => "LAST LIGHT",
         }
     }
@@ -53,10 +56,11 @@ pub enum Sfx {
 }
 const SFX_COUNT: usize = 16;
 
-pub const MUSIC_FILES: [(Track, &[u8]); 4] = [
+pub const MUSIC_FILES: [(Track, &[u8]); 5] = [
     (Track::Title, include_bytes!("../assets/music/title_orbital_drift.ogg")),
     (Track::Rush, include_bytes!("../assets/music/stage_comet_rush.ogg")),
     (Track::Cascade, include_bytes!("../assets/music/stage_supernova_cascade.ogg")),
+    (Track::Crazy, include_bytes!("../assets/music/stage_crazy_comets.ogg")),
     (Track::GameOver, include_bytes!("../assets/music/game_over.ogg")),
 ];
 
