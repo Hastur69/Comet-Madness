@@ -134,8 +134,8 @@ pub enum Mode {
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
-            Mode::MadPlanets => "MAD PLANETS",
-            Mode::CrazyComets => "CRAZY COMETS",
+            Mode::MadPlanets => "CRAZY PLANETS",
+            Mode::CrazyComets => "MAD COMETS",
         }
     }
 }
